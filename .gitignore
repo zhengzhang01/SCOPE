@@ -1,0 +1,41 @@
+# Bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Environments and local configuration
+.env
+.env.*
+.venv/
+venv/
+env/
+
+# Logs and experiment outputs
+*.log
+wandb/
+mlruns/
+workspace/
+runs/
+outputs/
+scope_predictions/
+
+# Model artifacts
+checkpoint/
+checkpoints/
+*.ckpt
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

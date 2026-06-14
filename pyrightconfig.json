@@ -1,0 +1,10 @@
+{   
+    "include": [
+        "scope", 
+        "scripts",
+        "baselines"
+    ],
+    "ignore": [
+        "**"
+    ]
+}

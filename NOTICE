@@ -1,0 +1,24 @@
+SCOPE third-party notices
+=========================
+
+SCOPE contains original SCOPE implementation code plus code adapted from or bundled with open-source projects.
+
+MoGe
+----
+Parts of the model structure, utilities, and package organization build on ideas and code structure from MoGe:
+
+    https://github.com/microsoft/MoGe
+
+MoGe is distributed with an MIT license notice from Microsoft Corporation and Apache License 2.0 text. SCOPE retains the relevant license text in LICENSE and acknowledges the MoGe project in README.md.
+
+DINOv2
+------
+Code under scope/model/dinov2 is derived from DINOv2 by Meta Platforms, Inc. and affiliates and is licensed under the Apache License, Version 2.0, as stated in those source headers.
+
+Temporal attention and motion modules
+-------------------------------------
+Code under scope/model/motion_module includes Apache-2.0-licensed components derived from AnimateDiff and HuggingFace implementations, as stated in those source headers.
+
+utils3d
+-------
+The repository includes a bundled copy of utils3d under utils3d/. utils3d is licensed under the MIT License by EasternJournalist; its original license is retained at utils3d/LICENSE.

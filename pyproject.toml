@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scope"
+version = "1.0.0"
+description = "SCOPE: scale-consistent monocular video geometry estimation"
+readme = "README.md"
+license = {file = "LICENSE"}
+dependencies = [
+    "click",
+    "opencv-python-headless",
+    "scipy",
+    "matplotlib",
+    "trimesh",
+    "pillow",
+    "huggingface_hub",
+    "numpy",
+    "torch>=2.0.0",
+    "torchvision",
+    "accelerate",
+    "tensorboard",
+    "mlflow",
+    "h5py",
+    "pyquaternion",
+    "easydict",
+    "einops",
+    "OpenEXR",
+    "Imath",
+    "decord",
+    "utils3d @ git+https://github.com/EasternJournalist/utils3d.git@3913c65d81e05e47b9f367250cf8c0f7462a0900"
+]
+requires-python = ">=3.9"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scope*"]
+
+[project.scripts]
+scope = "scope.scripts.cli:main"
