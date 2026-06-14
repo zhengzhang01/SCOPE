@@ -767,7 +767,7 @@ def build_parser():
     parser.add_argument('--input-dir', type=str, required=True,
                       help='Root directory containing image sequences, a single image-sequence directory, or a video file')
     parser.add_argument('--checkpoint', type=str, default=DEFAULT_CHECKPOINT,
-                      help=f'Checkpoint path, Hugging Face repo id, or "auto". Default auto checks local bundle then downloads from {SCOPE_CHECKPOINT_REPO_ID}.')
+                      help=f'Checkpoint path, Hugging Face repo id, or "auto". Default auto downloads and caches from {SCOPE_CHECKPOINT_REPO_ID}.')
     parser.add_argument('--output-dir', type=str, default='./scope_predictions',
                       help='Directory to save SCOPE prediction .npz files')
     parser.add_argument('--gpus', type=int, nargs='+',

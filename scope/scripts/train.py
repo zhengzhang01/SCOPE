@@ -71,78 +71,6 @@ def _first_existing_path(*paths: Path) -> Optional[Path]:
     return next((path for path in paths if path.exists()), None)
 
 
-SMOKE_TRAIN_CONFIG = {
-    "model_name": "scope",
-    "model": {
-        "encoder": "dinov2_vitl14",
-        "remap_output": "exp",
-        "intermediate_layers": 4,
-        "dim_upsample": [256, 128, 64],
-        "dim_times_res_block_hidden": 2,
-        "num_res_blocks": 2,
-        "num_tokens_range": [16, 16],
-        "last_conv_channels": 32,
-        "last_conv_size": 1,
-        "num_frames": 24,
-        "pe": "rope",
-        "pe_stretch_prob": 0.5,
-    },
-    "optimizer": {
-        "type": "AdamW",
-        "params": [
-            {"params": {"include": ["*"], "exclude": ["*backbone.*"]}, "lr": 1e-4},
-            {"params": {"include": ["*backbone.*"]}, "lr": 1e-5},
-        ],
-    },
-    "lr_scheduler": {
-        "type": "SequentialLR",
-        "params": {
-            "schedulers": [
-                {"type": "LambdaLR", "params": {"lr_lambda": ["1.0", "max(0.0, min(1.0, (epoch - 1000) / 1000))"]}},
-                {"type": "StepLR", "params": {"step_size": 25000, "gamma": 0.5}},
-            ],
-            "milestones": [2000],
-        },
-    },
-    "low_resolution_training_steps": 50000,
-    "loss": {
-        "synthetic": {
-            "global": {
-                "function": "affine_invariant_global_loss",
-                "weight": 1.0,
-                "params": {
-                    "align_resolution": 16,
-                    "beta": 0.0,
-                    "trunc": 1.0,
-                    "sparsity_aware": False,
-                    "align_method": "roe",
-                    "use_downsample": True,
-                    "video_align": False,
-                    "shift_mode": "z_only",
-                },
-            },
-            "patch_4": {
-                "function": "affine_invariant_local_loss",
-                "weight": 1.0,
-                "params": {
-                    "level": 4,
-                    "align_resolution": 8,
-                    "num_patches": 4,
-                    "beta": 0.0,
-                    "trunc": 1.0,
-                    "sparsity_aware": False,
-                    "align_method": "roe",
-                    "shift_mode": "xyz",
-                },
-            },
-            "mask": {
-                "function": "mask_l2_loss",
-                "weight": 1.0,
-            },
-        }
-    },
-}
-
 
 def get_loss_value(loss):
     return loss.item() if hasattr(loss, 'item') else float(loss)
@@ -170,7 +98,6 @@ def get_loss_value(loss):
 @click.option('--g_s', type=float, default=13.0, help='Strength of gaussian noise')
 @click.option('--sample_interval', type=int, default=3, help='Sample interval for datasets')
 @click.option('--img_size', type=int, default=728, help='Image size for training')
-@click.option('--smoke-test', is_flag=True, help='Run a single synthetic training step without external datasets.')
 def main(
     config_path: str,
     workspace: str,
@@ -194,17 +121,10 @@ def main(
     g_s: float,
     sample_interval: int,
     img_size: int,
-    smoke_test: bool,
 ):
-    if smoke_test and torch.cuda.is_available():
-        enable_mixed_precision = True
-
     # Load config
-    if smoke_test:
-        config = json.loads(json.dumps(SMOKE_TRAIN_CONFIG))
-    else:
-        with open(config_path, 'r') as f:
-            config = json.load(f)
+    with open(config_path, 'r') as f:
+        config = json.load(f)
     dataset_roots = config.get('data', {}).get('dataset_roots', {})
     dataset_metadata = config.get('data', {}).get('metadata', {})
 
@@ -270,273 +190,184 @@ def main(
     size = (img_size, img_size)
     datasets = []
 
-    def _build_smoke_batch(batch_size: int, frames_per_sample: int, image_size: int, device: torch.device):
-        h = w = image_size
-        yy, xx = torch.meshgrid(
-            torch.linspace(0.0, 1.0, h, device=device),
-            torch.linspace(0.0, 1.0, w, device=device),
-            indexing='ij',
-        )
-        base_depth = 1.0 + 0.25 * xx + 0.15 * yy
-        image_mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(3, 1, 1)
-        image_std = torch.tensor([0.229, 0.224, 0.225], device=device).view(3, 1, 1)
-        image_frames = []
-        pointmaps = []
-        valid_masks = []
-        sky_masks = []
-        intrinsics = []
-        camera_poses = []
-        for b in range(batch_size):
-            frame_stack = []
-            point_stack = []
-            valid_stack = []
-            sky_stack = []
-            intr_stack = []
-            pose_stack = []
-            for t in range(frames_per_sample):
-                r = torch.remainder(xx + 0.07 * (b + t), 1.0)
-                g = torch.remainder(yy + 0.05 * (b + t), 1.0)
-                bch = torch.remainder(0.5 * xx + 0.5 * yy + 0.03 * t, 1.0)
-                frame = torch.stack([r, g, bch], dim=0).float()
-                frame = (frame - image_mean) / image_std
-                depth = base_depth + 0.03 * t + 0.02 * b
-                K = torch.tensor(
-                    [[1.25, 0.0, 0.5], [0.0, 1.25, 0.5], [0.0, 0.0, 1.0]],
-                    device=device,
-                    dtype=torch.float32,
-                )
-                point_map = generate_pointmap(depth, K)
-                valid = depth > 0
-                sky = torch.zeros_like(valid)
-                frame_stack.append(frame)
-                point_stack.append(point_map)
-                valid_stack.append(valid)
-                sky_stack.append(sky)
-                intr_stack.append(K)
-                pose_stack.append(torch.eye(4, device=device, dtype=torch.float32))
-            image_frames.append(torch.stack(frame_stack, dim=0))
-            pointmaps.append(torch.stack(point_stack, dim=0))
-            valid_masks.append(torch.stack(valid_stack, dim=0))
-            sky_masks.append(torch.stack(sky_stack, dim=0))
-            intrinsics.append(torch.stack(intr_stack, dim=0))
-            camera_poses.append(torch.stack(pose_stack, dim=0))
+    # TartanAirPoint dataset
+    tartan_dataset = TartanAirPoint(
+        filelist_path='scope/dataset/splits/tartanair.txt',
+        mode='train',
+        images_per_sample=images_per_sample,
+        size=size,
+        sample_interval=(sample_interval * 3),
+        duplicate_times=1,
+        disparity=False,
+        cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
+    )
+    datasets.append(tartan_dataset)
 
-        batch = {
-            'image': torch.stack(image_frames, dim=0),
-            'pointmap': torch.stack(pointmaps, dim=0),
-            'valid_mask': torch.stack(valid_masks, dim=0),
-            'sky_mask': torch.stack(sky_masks, dim=0),
-            'intrinsics': torch.stack(intrinsics, dim=0),
-            'camera_poses': torch.stack(camera_poses, dim=0),
-        }
-        batch['depth'] = batch['pointmap'][:, :, 2]
-        return batch
+    # PointOdysseyPoint dataset
+    pointodyssey_dataset = PointOdysseyPoint(
+        filelist_path='scope/dataset/splits/pointodyssey.txt',
+        mode='train',
+        images_per_sample=images_per_sample,
+        size=size,
+        sample_interval=sample_interval,
+        duplicate_times=1,
+        disparity=False,
+        cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
+    )
+    datasets.append(pointodyssey_dataset)
 
-    if smoke_test:
-        print('Running smoke-test training path')
-        datasets = []
-        batch = _build_smoke_batch(
-            batch_size=batch_size_forward,
-            frames_per_sample=config['model']['num_frames'],
-            image_size=56,
-            device=device,
-        )
-        train_loader = [batch]
-        config = adjust_config(
-            config=config,
-            datasets=[type('SmokeDataset', (), {'__len__': lambda self: 1})()],
-            batch_size_forward=batch_size_forward,
-            gradient_accumulation_steps=gradient_accumulation_steps,
-            num_processes=accelerator.num_processes,
-            images_per_sample=config['model']['num_frames'],
-            epochs=1,
-        )
-    else:
-        datasets = []
+    # SpringPoint dataset
+    spring_dataset = SpringPoint(
+        filelist_path='scope/dataset/splits/spring.txt',
+        mode='train',
+        images_per_sample=images_per_sample,
+        size=size,
+        sample_interval=2,
+        duplicate_times=6,
+        disparity=False,
+        cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
+        cam_data_base=_dataset_metadata('Spring', 'cam_data_base'),
+    )
+    datasets.append(spring_dataset)
 
-    if not smoke_test:
-        # TartanAirPoint dataset
-        tartan_dataset = TartanAirPoint(
-            filelist_path='scope/dataset/splits/tartanair.txt',
-            mode='train',
-            images_per_sample=images_per_sample,
-            size=size,
-            sample_interval=(sample_interval * 3),
-            duplicate_times=1,
-            disparity=False,
-            cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
-        )
-        datasets.append(tartan_dataset)
+    # VKitti2Point dataset
+    vkitti_dataset = VKitti2Point(
+        filelist_path='scope/dataset/splits/vkitti.txt',
+        mode='train',
+        images_per_sample=images_per_sample,
+        size=size,
+        sample_interval=sample_interval,
+        duplicate_times=1,
+        disparity=False,
+        cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
+    )
+    datasets.append(vkitti_dataset)
 
-        # PointOdysseyPoint dataset
-        pointodyssey_dataset = PointOdysseyPoint(
-            filelist_path='scope/dataset/splits/pointodyssey.txt',
-            mode='train',
-            images_per_sample=images_per_sample,
-            size=size,
-            sample_interval=sample_interval,
-            duplicate_times=1,
-            disparity=False,
-            cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
-        )
-        datasets.append(pointodyssey_dataset)
+    # LightWheelPoint dataset
+    lightwheel_dataset = LightWheelPoint(
+        filelist_path='scope/dataset/splits/lightwheel.txt',
+        mode='train',
+        images_per_sample=images_per_sample,
+        size=size,
+        sample_interval=sample_interval,
+        duplicate_times=1,
+        disparity=False,
+        cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
+        info_pickle_paths=_dataset_metadata('LightWheel', 'info_pickle_paths', []),
+    )
+    datasets.append(lightwheel_dataset)
 
-        # SpringPoint dataset
-        spring_dataset = SpringPoint(
-            filelist_path='scope/dataset/splits/spring.txt',
-            mode='train',
-            images_per_sample=images_per_sample,
-            size=size,
-            sample_interval=2,
-            duplicate_times=6,
-            disparity=False,
-            cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
-            cam_data_base=_dataset_metadata('Spring', 'cam_data_base'),
-        )
-        datasets.append(spring_dataset)
+    # HypersimPoint dataset
+    hypersim_dataset = HypersimPoint(
+        filelist_path='scope/dataset/splits/hypersim/all.txt',
+        mode='train',
+        images_per_sample=images_per_sample,
+        size=size,
+        sample_interval=1,
+        duplicate_times=1,
+        disparity=False,
+        cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
+        metadata_root=_dataset_root('Hypersim'),
+    )
+    datasets.append(hypersim_dataset)
 
-        # VKitti2Point dataset
-        vkitti_dataset = VKitti2Point(
-            filelist_path='scope/dataset/splits/vkitti.txt',
-            mode='train',
-            images_per_sample=images_per_sample,
-            size=size,
-            sample_interval=sample_interval,
-            duplicate_times=1,
-            disparity=False,
-            cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
-        )
-        datasets.append(vkitti_dataset)
+    # GTAIMPoint dataset
+    gtaim_dataset = GTAIMPoint(
+        filelist_path='scope/dataset/splits/GTAIM.txt',
+        mode='train',
+        images_per_sample=images_per_sample,
+        size=size,
+        sample_interval=(sample_interval * 2),
+        duplicate_times=1,
+        disparity=False,
+        cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
+    )
+    datasets.append(gtaim_dataset)
 
-        # LightWheelPoint dataset
-        lightwheel_dataset = LightWheelPoint(
-            filelist_path='scope/dataset/splits/lightwheel.txt',
-            mode='train',
-            images_per_sample=images_per_sample,
-            size=size,
-            sample_interval=sample_interval,
-            duplicate_times=1,
-            disparity=False,
-            cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
-            info_pickle_paths=_dataset_metadata('LightWheel', 'info_pickle_paths', []),
-        )
-        datasets.append(lightwheel_dataset)
+    # MVSSynthPoint dataset
+    mvssynth_dataset = MVSSynthPoint(
+        filelist_path='scope/dataset/splits/mvssynth.txt',
+        mode='train',
+        images_per_sample=images_per_sample,
+        size=size,
+        sample_interval=sample_interval,
+        duplicate_times=1,
+        disparity=False,
+        cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
+    )
+    datasets.append(mvssynth_dataset)
 
-        # HypersimPoint dataset
-        hypersim_dataset = HypersimPoint(
-            filelist_path='scope/dataset/splits/hypersim/all.txt',
-            mode='train',
-            images_per_sample=images_per_sample,
-            size=size,
-            sample_interval=1,
-            duplicate_times=1,
-            disparity=False,
-            cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
-            metadata_root=_dataset_root('Hypersim'),
-        )
-        datasets.append(hypersim_dataset)
+    # US4KPoint dataset
+    us4k_dataset = US4KPoint(
+        filelist_path='scope/dataset/splits/US4k.txt',
+        mode='train',
+        images_per_sample=images_per_sample,
+        size=size,
+        sample_interval=(sample_interval * 2),
+        duplicate_times=1,
+        disparity=False,
+        cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
+    )
+    datasets.append(us4k_dataset)
 
-        # GTAIMPoint dataset
-        gtaim_dataset = GTAIMPoint(
-            filelist_path='scope/dataset/splits/GTAIM.txt',
-            mode='train',
-            images_per_sample=images_per_sample,
-            size=size,
-            sample_interval=(sample_interval * 2),
-            duplicate_times=1,
-            disparity=False,
-            cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
-        )
-        datasets.append(gtaim_dataset)
+    # GTASFMPoint dataset
+    gtasfm_dataset = GTASFMPoint(
+        data_dir=_dataset_root('GTASFM'),
+        mode='train',
+        images_per_sample=images_per_sample,
+        size=size,
+        sample_interval=1,
+        duplicate_times=1,
+        disparity=False,
+        cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
+    )
+    datasets.append(gtasfm_dataset)
 
-        # MVSSynthPoint dataset
-        mvssynth_dataset = MVSSynthPoint(
-            filelist_path='scope/dataset/splits/mvssynth.txt',
-            mode='train',
-            images_per_sample=images_per_sample,
-            size=size,
-            sample_interval=sample_interval,
-            duplicate_times=1,
-            disparity=False,
-            cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
-        )
-        datasets.append(mvssynth_dataset)
+    irs_dataset = IRSPoint(
+        filelist_path='scope/dataset/splits/IRS.txt',
+        mode='train',
+        images_per_sample=images_per_sample,
+        size=size,
+        sample_interval=(sample_interval * 6),
+        duplicate_times=1,
+        disparity=False,
+        cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
+        dataset_root=_dataset_root('IRS'),
+    )
+    datasets.append(irs_dataset)
 
-        # US4KPoint dataset
-        us4k_dataset = US4KPoint(
-            filelist_path='scope/dataset/splits/US4k.txt',
-            mode='train',
-            images_per_sample=images_per_sample,
-            size=size,
-            sample_interval=(sample_interval * 2),
-            duplicate_times=1,
-            disparity=False,
-            cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
-        )
-        datasets.append(us4k_dataset)
-
-        # GTASFMPoint dataset
-        gtasfm_dataset = GTASFMPoint(
-            data_dir=_dataset_root('GTASFM'),
-            mode='train',
-            images_per_sample=images_per_sample,
-            size=size,
-            sample_interval=1,
-            duplicate_times=1,
-            disparity=False,
-            cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
-        )
-        datasets.append(gtasfm_dataset)
-
-        irs_dataset = IRSPoint(
-            filelist_path='scope/dataset/splits/IRS.txt',
-            mode='train',
-            images_per_sample=images_per_sample,
-            size=size,
-            sample_interval=(sample_interval * 6),
-            duplicate_times=1,
-            disparity=False,
-            cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
-            dataset_root=_dataset_root('IRS'),
-        )
-        datasets.append(irs_dataset)
-
-        midair_dataset = MidAirPoint(
-            filelist_path='scope/dataset/splits/midair.txt',
-            mode='train',
-            images_per_sample=images_per_sample,
-            size=size,
-            sample_interval=(sample_interval * 7),
-            duplicate_times=1,
-            disparity=False,
-            cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
-        )
-        datasets.append(midair_dataset)
+    midair_dataset = MidAirPoint(
+        filelist_path='scope/dataset/splits/midair.txt',
+        mode='train',
+        images_per_sample=images_per_sample,
+        size=size,
+        sample_interval=(sample_interval * 7),
+        duplicate_times=1,
+        disparity=False,
+        cj_p=cj_p, cj_s=cj_s, g_p=g_p, g_s=g_s,
+    )
+    datasets.append(midair_dataset)
     
-    if not smoke_test:
-        # Create DataLoader with combined dataset
-        train_dataset = ConcatDataset(datasets)
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=batch_size_forward,
-            shuffle=True,
-            num_workers=32,
-            pin_memory=False,
-            drop_last=False
-        )
-        print(f"accelerator.num_processes: {accelerator.num_processes}")
-        config = adjust_config(
-            config=config, 
-            datasets=datasets,
-            batch_size_forward=batch_size_forward,
-            gradient_accumulation_steps=gradient_accumulation_steps,
-            num_processes=accelerator.num_processes,
-            images_per_sample=images_per_sample,
-            epochs=epochs
-        )
-    else:
-        train_loader = [batch]
-        print(f"accelerator.num_processes: {accelerator.num_processes}")
+    # Create DataLoader with combined dataset
+    train_dataset = ConcatDataset(datasets)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size_forward,
+        shuffle=True,
+        num_workers=32,
+        pin_memory=False,
+        drop_last=False
+    )
+    print(f"accelerator.num_processes: {accelerator.num_processes}")
+    config = adjust_config(
+        config=config, 
+        datasets=datasets,
+        batch_size_forward=batch_size_forward,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        num_processes=accelerator.num_processes,
+        images_per_sample=images_per_sample,
+        epochs=epochs
+    )
     
     # Initalize optimizer & lr scheduler
     optimizer = build_optimizer(model, config['optimizer'])
@@ -651,20 +482,17 @@ def main(
         del checkpoint
         
     # Set initial epoch based on initial_step
-    initial_epoch = 0 if smoke_test else initial_step // len(train_loader)
+    initial_epoch = initial_step // len(train_loader)
     for dataset in datasets:
         if hasattr(dataset, 'set_epoch'):
             dataset.set_epoch(initial_epoch)
     
     # Prepare with accelerator
-    if smoke_test:
-        model, optimizer = accelerator.prepare(model, optimizer)
-    else:
-        model, optimizer, train_loader = accelerator.prepare(model, optimizer, train_loader)
+    model, optimizer, train_loader = accelerator.prepare(model, optimizer, train_loader)
 
-    num_iterations = 1 if smoke_test else epochs * len(train_loader)
+    num_iterations = epochs * len(train_loader)
     
-    # CRITICAL FIX: Set static graph for DDP
+    # Use a static graph after wrapping the model for DDP.
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         print(f"Process {accelerator.process_index}: Setting static graph for DDP")
         model._set_static_graph()
@@ -715,16 +543,13 @@ def main(
          ThreadPoolExecutor(max_workers=1) as save_checkpoint_executor:
         
         i_step = initial_step
-        for epoch in range(initial_epoch, 1 if smoke_test else epochs):
-            if not smoke_test:
-                # Update datasets with current epoch
-                for dataset in datasets:
-                    if hasattr(dataset, 'set_epoch'):
-                        dataset.set_epoch(epoch)
+        for epoch in range(initial_epoch, epochs):
+            # Update datasets with current epoch
+            for dataset in datasets:
+                if hasattr(dataset, 'set_epoch'):
+                    dataset.set_epoch(epoch)
 
-                train_iter = iter(train_loader)
-            else:
-                train_iter = iter(train_loader)
+            train_iter = iter(train_loader)
 
             for batch_idx in range(len(train_loader)):
                 if i_step >= num_iterations:
@@ -734,25 +559,14 @@ def main(
                 try:
                     sample = next(train_iter)
                 except StopIteration:
-                    if smoke_test:
-                        break
                     train_iter = iter(train_loader)
                     sample = next(train_iter)
 
-                if smoke_test:
-                    img = sample['image']
-                    pointmap = sample['pointmap'].permute(0, 1, 3, 4, 2)
-                    valid_mask = sample['valid_mask']
-                    sky_mask = sample['sky_mask']
-                    intrinsics = sample['intrinsics']
-                    camera_poses = sample.get('camera_poses', None)
-                    gt_focal = 1 / (1 / (intrinsics[..., 0, 0] / (2 * intrinsics[..., 0, 2])) ** 2 + 1 / (intrinsics[..., 1, 1] / (2 * intrinsics[..., 1, 2])) ** 2) ** 0.5
-                else:
-                    img, depth, valid_mask = sample['image'], sample['depth'], sample['valid_mask']
-                    sky_mask, pointmap = sample['sky_mask'], sample['pointmap'].permute(0, 1, 3, 4, 2)
-                    intrinsics = sample['intrinsics']
-                    camera_poses = sample.get('camera_poses', None)
-                    gt_focal = 1 / (1 / (intrinsics[..., 0, 0] / (2 * intrinsics[..., 0, 2])) ** 2 + 1 / (intrinsics[..., 1, 1] / (2 * intrinsics[..., 1, 2])) ** 2) ** 0.5
+                img, depth, valid_mask = sample['image'], sample['depth'], sample['valid_mask']
+                sky_mask, pointmap = sample['sky_mask'], sample['pointmap'].permute(0, 1, 3, 4, 2)
+                intrinsics = sample['intrinsics']
+                camera_poses = sample.get('camera_poses', None)
+                gt_focal = 1 / (1 / (intrinsics[..., 0, 0] / (2 * intrinsics[..., 0, 2])) ** 2 + 1 / (intrinsics[..., 1, 1] / (2 * intrinsics[..., 1, 2])) ** 2) ** 0.5
                 
                 with accelerator.accumulate(model):
                     # Forward
@@ -844,7 +658,7 @@ def main(
                     records = []
 
                 # Save model weight checkpoint
-                if (not smoke_test) and accelerator.is_main_process and (i_step % save_every == 0) and i_step != 0:
+                if accelerator.is_main_process and (i_step % save_every == 0) and i_step != 0:
                     # NOTE: Writing checkpoint is done in a separate thread to avoid blocking the main process
                     pbar.write(f'Save checkpoint: {i_step:08d}')
                     Path(workspace, 'checkpoint').mkdir(parents=True, exist_ok=True)
@@ -896,7 +710,7 @@ def main(
                         _write_bytes_retry_loop, Path(workspace, 'checkpoint', 'latest.pt'), checkpoint_bytes
                     )
                 
-                if (not smoke_test) and accelerator.is_main_process and i_step == num_iterations - 1:
+                if accelerator.is_main_process and i_step == num_iterations - 1:
                     final_step = i_step - 1  # Last completed step
                     pbar.write(f'Training completed, saving final model weights: {final_step:08d}')
                     Path(workspace, 'checkpoint').mkdir(parents=True, exist_ok=True)
@@ -929,10 +743,6 @@ def main(
                 pbar.set_postfix({'loss': total_loss.item()}, refresh=False)
                 pbar.update(1)
                 i_step += 1
-                if smoke_test:
-                    break
-            if smoke_test:
-                break
                 
 
 if __name__ == '__main__':

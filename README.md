@@ -1,26 +1,22 @@
 # SCOPE
 
-SCOPE estimates scale-consistent monocular video geometry from image sequences. This open-source package contains the SCOPE model code, the public training entrypoint, and the public inference entrypoint used by the released checkpoint.
+SCOPE estimates scale-consistent monocular video geometry from image sequences. This repository contains the SCOPE model code, training entrypoint, and inference entrypoint used by the released weights.
 
 - Project page: [https://scope3d.github.io/](https://scope3d.github.io/)
 - Paper: [https://scope3d.github.io/](https://scope3d.github.io/)
+- Model weights: [zhengzhang01/SCOPE](https://huggingface.co/zhengzhang01/SCOPE)
+- Direct checkpoint: [checkpoint.pt](https://huggingface.co/zhengzhang01/SCOPE/resolve/main/checkpoint.pt)
 
-## Checkpoint
+## Model Weights
 
-By default, SCOPE first looks for a local checkpoint at:
+By default, SCOPE automatically downloads `checkpoint.pt` from the Hugging Face model repository `zhengzhang01/SCOPE` and reuses the local Hugging Face cache on later runs.
 
-```bash
-../checkpoint/checkpoint.pt
-```
-
-From this directory, that resolves to the sibling `checkpoint` folder in the release bundle. If the file is not present, SCOPE automatically downloads `checkpoint.pt` from the Hugging Face model repository `zhengzhang01/SCOPE` and reuses the local Hugging Face cache on later runs.
-
-You can override the checkpoint source with `--checkpoint /path/to/checkpoint.pt` or `--checkpoint <huggingface_repo_id>`.
+You can override the weight source with `--checkpoint /path/to/checkpoint.pt` or `--checkpoint <huggingface_repo_id>`.
 
 ## Installation
 
 ```bash
-cd scope
+cd SCOPE
 pip install -r requirements.txt
 pip install -e .
 ```
@@ -120,52 +116,20 @@ Edit `configs/train/scope.json` before full training:
 - `data.metadata.Spring.cam_data_base`: optional Spring camera-data root. If omitted, the loader infers it from split paths.
 - `data.metadata.LightWheel.info_pickle_paths`: optional LightWheel metadata pickle files.
 
-Training saves the final model weights to `workspace/scope/checkpoint/checkpoint.pt`. Periodic checkpoints are saved as `step_XXXXXXXX.pt`.
-
-### Smoke Test
-
-Use the smoke test to validate the training code path without external datasets. It builds a synthetic 24-frame batch, loads the checkpoint, runs one forward/backward/update step, and writes logs/checkpoint metadata to the workspace.
-
-```bash
-scope train \
-  --smoke-test \
-  --workspace /tmp/scope_smoke_train \
-  --epochs 1 \
-  --batch_size_forward 1 \
-  --gradient_accumulation_steps 1 \
-  --enable_mlflow False \
-  --enable_ema False \
-  --enable_gradient_checkpointing False \
-  --enable_mixed_precision True \
-  --save_every 1000 \
-  --log_every 1 \
-  --vis_every 0
-```
+Training saves final model weights to `workspace/scope/checkpoint/checkpoint.pt`. Periodic training states are saved as `step_XXXXXXXX.pt`.
 
 ## Python API
 
 ```python
-from pathlib import Path
 from scope.model import import_model_class
+from scope.utils.checkpoints import resolve_checkpoint_path
 
-checkpoint = Path("../checkpoint/checkpoint.pt")
+checkpoint = resolve_checkpoint_path("auto")
 ScopeModel = import_model_class("scope")
 model = ScopeModel.from_pretrained(checkpoint).cuda().eval()
 ```
 
-To use the hosted checkpoint in Python, resolve it first:
-
-```python
-from scope.utils.checkpoints import resolve_checkpoint_path
-
-checkpoint = resolve_checkpoint_path("auto")
-```
-
-## Model Weights
-
-The released checkpoint is hosted in the Hugging Face model repository `zhengzhang01/SCOPE` as `checkpoint.pt`.
-
-The default inference and training commands use this checkpoint automatically when no local checkpoint is found. To use a different public or private model repository, pass it explicitly:
+To use a different public or private model repository, pass it explicitly:
 
 ```bash
 scope infer \
