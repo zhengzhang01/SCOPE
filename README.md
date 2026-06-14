@@ -1,11 +1,33 @@
-# SCOPE
+<div align="center">
 
-SCOPE estimates scale-consistent monocular video geometry from image sequences. This repository contains the SCOPE model code, training entrypoint, and inference entrypoint used by the released weights.
+<h1>SCOPE: Scale-Consistent One-Pass Estimation of 3D Geometry</h1>
 
-- Project page: [https://scope3d.github.io/](https://scope3d.github.io/)
-- Paper: [https://scope3d.github.io/](https://scope3d.github.io/)
-- Model weights: [zhengzhang01/SCOPE](https://huggingface.co/zhengzhang01/SCOPE)
-- Direct checkpoint: [checkpoint.pt](https://huggingface.co/zhengzhang01/SCOPE/resolve/main/checkpoint.pt)
+[**Zheng Zhang**](https://zhengzhang01.github.io/)<sup>1</sup> ·
+[**Lihe Yang**](https://liheyoung.github.io/)<sup>1</sup> ·
+[**Tianyu Yang**](https://tianyu-yang.com/)<sup>2</sup> ·
+[**Chaohui Yu**](https://richardych.github.io/)<sup>2</sup> ·
+[**Yixing Lao**](https://yxlao.github.io/)<sup>1</sup> ·
+[**Xiaoyang Guo**](https://xy-guo.github.io/)<sup>3</sup> ·
+[**Biao Gong**](https://biao-gong.github.io/)<sup>4</sup> ·
+[**Fan Wang**](https://scholar.google.com/citations?hl=en&user=WCRGTHsAAAAJ)<sup>2</sup> ·
+[**Hengshuang Zhao**](https://hszhao.github.io/)<sup>1</sup>
+
+<sup>1</sup>The University of Hong Kong &emsp;
+<sup>2</sup>Alibaba Group &emsp;
+<sup>3</sup>Horizon Robotics &emsp;
+<sup>4</sup>Ant Group
+
+**SIGGRAPH Conference Papers 2026**
+
+<a href="https://scope3d.github.io/"><img src="https://img.shields.io/badge/Project_Page-SCOPE-2ea44f" alt="Project Page"></a>
+<a href="https://doi.org/10.1145/3799902.3811149"><img src="https://img.shields.io/badge/Paper-SIGGRAPH_2026-b31b1b" alt="Paper"></a>
+<a href="https://github.com/zhengzhang01/SCOPE"><img src="https://img.shields.io/badge/Code-GitHub-24292f" alt="Code"></a>
+<a href="https://huggingface.co/zhengzhang01/SCOPE"><img src="https://img.shields.io/badge/Model_Weights-Hugging_Face-f9d371" alt="Model Weights"></a>
+<a href="https://huggingface.co/zhengzhang01/SCOPE/resolve/main/checkpoint.pt"><img src="https://img.shields.io/badge/Checkpoint-checkpoint.pt-1f6feb" alt="Checkpoint"></a>
+
+</div>
+
+SCOPE estimates scale-consistent and temporally stable 3D geometry from monocular videos. This repository contains the model code, training entrypoint, and inference entrypoint used by the released weights.
 
 ## Model Weights
 
