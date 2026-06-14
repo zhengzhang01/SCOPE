@@ -29,12 +29,6 @@
 
 SCOPE estimates scale-consistent and temporally stable 3D geometry from monocular videos. This repository contains the model code, training entrypoint, and inference entrypoint used by the released weights.
 
-## Model Weights
-
-By default, SCOPE automatically downloads `checkpoint.pt` from the Hugging Face model repository `zhengzhang01/SCOPE` and reuses the local Hugging Face cache on later runs.
-
-You can override the weight source with `--checkpoint /path/to/checkpoint.pt` or `--checkpoint <huggingface_repo_id>`.
-
 ## Installation
 
 ```bash
